@@ -37,8 +37,8 @@ export default function MerchWheel() {
     const newSpinCount = spinCount + 1
     setSpinCount(newSpinCount)
 
-    // Check if this is the 100th spin (guaranteed Base T-Shirt)
-    const isGuaranteedWin = newSpinCount % 100 === 0
+    // Check if this is the 30th spin (guaranteed Base T-Shirt)
+    const isGuaranteedWin = newSpinCount % 30 === 0
 
     let selectedIndex: number
     let targetRotation: number
