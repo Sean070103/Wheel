@@ -44,68 +44,156 @@ export default function MerchWheel() {
   const [selectedItem, setSelectedItem] = useState<string | null>(null)
   const [rotation, setRotation] = useState(0)
   const [spinCount, setSpinCount] = useState(0)
-  const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
   const [resultMeta, setResultMeta] = useState<ResultMeta | null>(null)
   const wheelRef = useRef<HTMLDivElement>(null)
+
+  // Deterministic function to get target segment index based on spin number
+  // Repeating pattern that works for all spins:
+  // - Multiples of 10 (10, 20, 30, ...) → 'Base T-Shirt' or 'Cap' (alternating)
+  // - Multiples of 5 but not 10 (5, 15, 25, ...) → 'Tote Bag'
+  // - All other spins → 'Better Luck Next Time'
+  const getTargetSegmentIndex = (spinNumber: number): number => {
+    const targetPrize = (() => {
+      // Check multiples of 10 first (since they're also multiples of 5)
+      if (spinNumber % 10 === 0) {
+        // Deterministic alternating: even multiple of 10 → Base T-Shirt, odd → Cap
+        // Example: 10 → Base, 20 → Cap, 30 → Base, 40 → Cap
+        const multipleIndex = spinNumber / 10
+        return multipleIndex % 2 === 0 ? "Base T-Shirt" : "Cap"
+      } else if (spinNumber % 5 === 0) {
+        // Multiples of 5 but not 10 (5, 15, 25, 35, ...) → 'Tote Bag'
+        return "Tote Bag"
+      } else {
+        // All other spins → 'Better Luck Next Time'
+        return "Better Luck Next Time"
+      }
+    })()
+
+    // Find all indices with the target prize
+    const indices = merchItems
+      .map((item, index) => (item.name === targetPrize ? index : -1))
+      .filter(index => index !== -1)
+
+    if (indices.length === 0) {
+      console.error(`Prize "${targetPrize}" not found in segments`)
+      return 0
+    }
+
+    // Deterministic selection: use spin number to pick which instance
+    // This ensures the same spin number always picks the same segment
+    return indices[spinNumber % indices.length]
+  }
+
+  // Compute final rotation degrees (clockwise) to align segment center with arrow
+  const computeFinalRotationDegrees = (
+    segmentIndex: number,
+    currentRotation: number,
+    fullTurns: number = 8
+  ): number => {
+    const N = merchItems.length
+    const anglePerSegment = 360 / N
+    // Segment center angle in wheel coordinates (0° = top, clockwise)
+    const centerAngle = segmentIndex * anglePerSegment + anglePerSegment / 2
+    // Arrow is on the right side (90° from top)
+    const pointerAngle = 90
+    
+    // When wheel rotates by R degrees clockwise, segment at angle S moves to (R + S) mod 360
+    // We want: (finalRotation + centerAngle) mod 360 = pointerAngle
+    // So: finalRotation mod 360 = (pointerAngle - centerAngle + 360) mod 360
+    const correctiveAngle = ((pointerAngle - centerAngle + 360) % 360)
+    
+    // Calculate from current rotation
+    const currentNormalized = ((currentRotation % 360) + 360) % 360
+    let deltaRotation = correctiveAngle - currentNormalized
+    if (deltaRotation <= 0) deltaRotation += 360
+    
+    // Add full rotations for animation effect
+    const finalRotation = currentRotation + (fullTurns * 360) + deltaRotation
+    
+    return finalRotation
+  }
+
+  // Validate final rotation aligns correctly
+  const validateAlignment = (
+    finalRotation: number,
+    segmentIndex: number,
+    pointerAngle: number = 90
+  ): boolean => {
+    const N = merchItems.length
+    const anglePerSegment = 360 / N
+    const centerAngle = segmentIndex * anglePerSegment + anglePerSegment / 2
+    const finalMod360 = ((finalRotation % 360) + 360) % 360
+    const expectedAngle = ((pointerAngle - centerAngle + 360) % 360)
+    const tolerance = 0.001
+    const isAligned = Math.abs(finalMod360 - expectedAngle) < tolerance
+    
+    if (!isAligned) {
+      console.error(`Alignment validation failed: finalMod360=${finalMod360.toFixed(6)}°, expected=${expectedAngle.toFixed(6)}°`)
+    }
+    
+    return isAligned
+  }
 
   const spinWheel = () => {
     if (isSpinning) return
 
     setIsSpinning(true)
     setSelectedItem(null)
-    setHighlightIndex(null)
 
     // Increment spin count
     const newSpinCount = spinCount + 1
     setSpinCount(newSpinCount)
 
-    const selectRandomIndex = (allowedNames: string[]) => {
-      const indices = merchItems
-        .map((item, index) => (allowedNames.includes(item.name) ? index : -1))
-        .filter(index => index !== -1)
-      return indices[Math.floor(Math.random() * indices.length)]
+    // Deterministically get target segment index
+    const selectedIndex = getTargetSegmentIndex(newSpinCount)
+    const selectedPrize = merchItems[selectedIndex].name
+
+    // Compute final rotation with deterministic full turns
+    const fullTurns = 8 // Fixed number of full rotations for animation
+    const targetRotation = computeFinalRotationDegrees(selectedIndex, rotation, fullTurns)
+
+    // Validate alignment
+    const isValid = validateAlignment(targetRotation, selectedIndex)
+    if (!isValid) {
+      console.warn(`Warning: Alignment validation failed for spin ${newSpinCount}`)
     }
 
-    let selectedIndex: number
-    let targetRotation: number
-    const spinPosition = newSpinCount % 10
-
-    if (spinPosition === 0) {
-      // Every 10th spin (10, 20, 30, ...) guarantees Base T-Shirt or Cap
-      selectedIndex = selectRandomIndex(["Base T-Shirt", "Cap"])
-      console.log(`Spin ${newSpinCount}: GUARANTEED Cap/T-Shirt at index ${selectedIndex}`)
-    } else if (spinPosition === 5) {
-      // Every 5th spin (5, 15, 25, ...) guarantees Tote Bag unless captured by 10th spin
-      selectedIndex = selectRandomIndex(["Tote Bag"])
-      console.log(`Spin ${newSpinCount}: GUARANTEED Tote Bag at index ${selectedIndex}`)
+    // Determine which rule was applied for logging
+    let ruleApplied = ""
+    if (newSpinCount % 10 === 0) {
+      const multipleIndex = newSpinCount / 10
+      ruleApplied = `Multiple of 10 (${multipleIndex}×10) → ${selectedPrize}`
+    } else if (newSpinCount % 5 === 0) {
+      ruleApplied = `Multiple of 5 (not 10) → ${selectedPrize}`
     } else {
-      // All other spins result in Better Luck Next Time
-      selectedIndex = selectRandomIndex(["Better Luck Next Time"])
-      console.log(`Spin ${newSpinCount}: Better Luck Next Time at index ${selectedIndex}`)
+      ruleApplied = `Other spin → ${selectedPrize}`
     }
-
-    // Ensure the wheel lands exactly on the selected segment (top pointer)
-    const sectionAngle = 360 / merchItems.length
-    const segmentCenterAngle = selectedIndex * sectionAngle + sectionAngle / 2
-    const pointerOffset = 360 - sectionAngle / 2 // empirically calibrated
-    const pointerAngle = (-90 + pointerOffset) % 360
-    const currentNormalized = ((rotation % 360) + 360) % 360
-    const targetNormalized =
-      ((pointerAngle - segmentCenterAngle) % 360 + 360) % 360
-    const alignmentRotation =
-      ((targetNormalized - currentNormalized) % 360 + 360) % 360
     
-    // Generate multiple full rotations plus the alignment adjustment
-    const fullRotations = 8 + Math.random() * 8 // 8-16 full rotations
-    targetRotation = rotation + (fullRotations * 360) + alignmentRotation
+    console.log(`Spin ${newSpinCount}: Deterministic selection`)
+    console.log(`  Rule: ${ruleApplied}`)
+    console.log(`  Segment index: ${selectedIndex}`)
+    console.log(`  Final rotation: ${targetRotation.toFixed(6)}°`)
+    console.log(`  Alignment valid: ${isValid}`)
 
     setResultMeta(null)
     setRotation(targetRotation)
 
+    // Stop the wheel and show the prize popup after it lands on the arrow
     setTimeout(() => {
-      setHighlightIndex(selectedIndex)
-      setSelectedItem(merchItems[selectedIndex].name)
       setIsSpinning(false)
+      
+      // Final validation after animation completes
+      const finalValidation = validateAlignment(targetRotation, selectedIndex)
+      if (!finalValidation) {
+        console.error(`CRITICAL: Final alignment validation failed for spin ${newSpinCount}`)
+      } else {
+        console.log(`✓ Final alignment validated for spin ${newSpinCount}`)
+      }
+      
+      // Brief pause to show it landed on the arrow before showing popup
+      setTimeout(() => {
+        setSelectedItem(merchItems[selectedIndex].name)
+      }, 1000)
     }, 5000)
   }
 
@@ -115,7 +203,6 @@ export default function MerchWheel() {
     setIsSpinning(false)
     setSpinCount(0)
     setResultMeta(null)
-    setHighlightIndex(null)
     console.log("Wheel reset - spin count back to 0")
   }
 
@@ -142,6 +229,25 @@ export default function MerchWheel() {
 
       <div className="relative flex flex-col items-center">
         <div className="relative z-10">
+          {/* Prize Indicator Arrow */}
+          <div className="absolute top-1/2 z-20" style={{ left: "calc(50% + min(78vw, 26rem) / 2 - 48px)", transform: "translateY(-50%) rotate(90deg)" }}>
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M24 0L32 16H28L28 48H20L20 16H16L24 0Z"
+                fill="url(#arrowGradient)"
+                stroke="white"
+                strokeWidth="2.5"
+                strokeLinejoin="round"
+              />
+              <defs>
+                <linearGradient id="arrowGradient" x1="24" y1="0" x2="24" y2="48" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stopColor="#5b8dff" />
+                  <stop offset="100%" stopColor="#3c5bff" />
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+
           {/* Pegs */}
           <div
             className="absolute rounded-full flex items-center justify-center"
@@ -170,7 +276,7 @@ export default function MerchWheel() {
               className="w-full h-full rounded-full overflow-hidden shadow-[0_25px_60px_rgba(15,23,42,0.3)] cursor-pointer bg-white"
               style={{
                 transform: `rotate(${rotation}deg)`,
-                  transition: isSpinning ? "transform 5s cubic-bezier(0.23, 1, 0.32, 1)" : "none",
+                  transition: isSpinning ? "transform 5s cubic-bezier(0.25, 0.46, 0.45, 0.94)" : "none",
               }}
               onClick={spinWheel}
             >
@@ -204,7 +310,6 @@ export default function MerchWheel() {
                   textFill === "white"
                     ? "drop-shadow(0 1px 2px rgba(0,0,0,0.45))"
                     : "drop-shadow(0 1px 1px rgba(255,255,255,0.8))"
-                const isHighlighted = highlightIndex === index && !isSpinning
 
                 return (
                 <div key={`${item.name}-${index}`} className="absolute inset-0">
@@ -214,18 +319,7 @@ export default function MerchWheel() {
                         fill={item.color}
                         stroke="rgba(0,0,0,0.08)"
                         strokeWidth="0.25"
-                        style={{
-                          filter: isHighlighted ? "drop-shadow(0 0 12px rgba(59,130,246,0.6))" : "none",
-                        }}
                       />
-                      {isHighlighted && (
-                        <path
-                          d={pathData}
-                          fill="none"
-                          stroke="#60a5fa"
-                          strokeWidth="1.5"
-                        />
-                      )}
                       <g transform={`translate(${textX}, ${textY}) rotate(${readableAngle})`}>
                         {isLongText ? (
                           <text
